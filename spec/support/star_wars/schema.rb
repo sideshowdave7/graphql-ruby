@@ -27,12 +27,27 @@ module StarWars
     field :planet, String, null: true
   end
 
-  # Use an optional block to add fields to the connection type:
-  BaseConnectionWithTotalCountType = BaseType.define_connection(nodes_field: true) do
-    name "BasesConnectionWithTotalCount"
-    field :totalCount do
-      type types.Int
-      resolve ->(obj, args, ctx) { obj.nodes.count }
+
+  class BaseEdge < GraphQL::Types::Relay::BaseEdge
+    node_type(BaseType)
+  end
+
+  class BaseConnection < GraphQL::Types::Relay::BaseConnection
+    edge_type(BaseEdge)
+  end
+
+  class BaseConnectionWithoutNodes < GraphQL::Types::Relay::BaseConnection
+    edge_type(BaseEdge, nodes_field: false)
+  end
+
+  class BasesConnectionWithTotalCountType < GraphQL::Types::Relay::BaseConnection
+    edge_type(BaseEdge, nodes_field: false)
+    nodes_field
+
+    field :total_count, Integer, null: true
+
+    def total_count
+      object.nodes.count
     end
   end
 
@@ -46,24 +61,29 @@ module StarWars
     end
   end
 
-  CustomBaseEdgeType = BaseType.define_edge do
-    name "CustomBaseEdge"
-    field :upcasedName, types.String, property: :upcased_name
-    field :upcasedParentName, types.String, property: :upcased_parent_name
-    field :edgeClassName, types.String do
-      resolve ->(obj, args, ctx) { obj.class.name }
+  class CustomBaseEdgeType < GraphQL::Types::Relay::BaseEdge
+    node_type(BaseType)
+    graphql_name "CustomBaseEdge"
+    field :upcased_name, String, null: true
+    field :upcased_parent_name, String, null: true
+    field :edge_class_name, String, null: true
+
+    def edge_class_name
+      object.class.name
     end
   end
 
-  CustomEdgeBaseConnectionType = BaseType.define_connection(edge_class: CustomBaseEdge, edge_type: CustomBaseEdgeType, nodes_field: true) do
-    name "CustomEdgeBaseConnection"
-
-    field :totalCountTimes100 do
-      type types.Int
-      resolve ->(obj, args, ctx) { obj.nodes.count * 100 }
+  class CustomEdgeBaseConnectionType < GraphQL::Types::Relay::BaseConnection
+    edge_type(CustomBaseEdgeType, edge_class: CustomBaseEdge, nodes_field: true)
+    field :total_count_times_100, Integer, null: true
+    def total_count_times_100
+      object.nodes.count * 100
     end
 
-    field :fieldName, types.String, resolve: ->(obj, args, ctx) { obj.field.name }
+    field :field_name, String, null: true
+    def field_name
+      object.field.name
+    end
   end
 
   # Example of GraphQL::Function used with the connection helper:
@@ -80,10 +100,12 @@ module StarWars
     type Ship.connection_type
   end
 
-  ShipConnectionWithParentType = Ship.define_connection do
-    name "ShipConnectionWithParent"
-    field :parentClassName, !types.String do
-      resolve ->(o, a, c) { o.parent.class.name }
+  class ShipConnectionWithParentType < GraphQL::Types::Relay::BaseConnection
+    edge_type(Ship.edge_type)
+    field :parent_class_name, String, null: false
+
+    def parent_class_name
+      object.parent.class.name
     end
   end
 
@@ -121,7 +143,7 @@ module StarWars
 
     field :shipsWithMaxPageSize, "Ships with max page size", max_page_size: 2, function: ShipsWithMaxPageSize.new
 
-    field :bases, BaseConnectionWithTotalCountType, null: true, connection: true, resolve: ->(obj, args, ctx) {
+    field :bases, BasesConnectionWithTotalCountType, null: true, connection: true, resolve: ->(obj, args, ctx) {
       all_bases = Base.where(id: obj.bases)
       if args[:nameIncludes]
         all_bases = all_bases.where("name LIKE ?", "%#{args[:nameIncludes]}%")
@@ -131,8 +153,8 @@ module StarWars
       argument :nameIncludes, String, required: false
     end
 
-    field :basesClone, BaseType.connection_type, null: true
-    field :basesByName, BaseType.connection_type, null: true do
+    field :basesClone, BaseConnection, null: true
+    field :basesByName, BaseConnection, null: true do
       argument :order, String, default_value: "name", required: false
     end
     def bases_by_name(order: nil)
@@ -143,13 +165,14 @@ module StarWars
       end
     end
 
-    field :basesWithMaxLimitRelation, BaseType.connection_type, null: true, max_page_size: 2, resolve: Proc.new { Base.all}
-    field :basesWithMaxLimitArray, BaseType.connection_type, null: true, max_page_size: 2, resolve: Proc.new { Base.all.to_a }
-    field :basesWithDefaultMaxLimitRelation, BaseType.connection_type, null: true, resolve: Proc.new { Base.all }
-    field :basesWithDefaultMaxLimitArray, BaseType.connection_type, null: true, resolve: Proc.new { Base.all.to_a }
-    field :basesWithLargeMaxLimitRelation, BaseType.connection_type, null: true, max_page_size: 1000, resolve: Proc.new { Base.all }
+    field :basesWithMaxLimitRelation, BaseConnection, null: true, max_page_size: 2, resolve: Proc.new { Base.all}
+    field :basesWithMaxLimitArray, BaseConnection, null: true, max_page_size: 2, resolve: Proc.new { Base.all.to_a }
+    field :basesWithDefaultMaxLimitRelation, BaseConnection, null: true, resolve: Proc.new { Base.all }
+    field :basesWithDefaultMaxLimitArray, BaseConnection, null: true, resolve: Proc.new { Base.all.to_a }
+    field :basesWithLargeMaxLimitRelation, BaseConnection, null: true, max_page_size: 1000, resolve: Proc.new { Base.all }
+    field :basesWithoutNodes, BaseConnectionWithoutNodes, null: true, resolve: Proc.new { Base.all.to_a }
 
-    field :basesAsSequelDataset, BaseConnectionWithTotalCountType, null: true, connection: true, max_page_size: 1000 do
+    field :basesAsSequelDataset, BasesConnectionWithTotalCountType, null: true, connection: true, max_page_size: 1000 do
       argument :nameIncludes, String, required: false
     end
 
@@ -297,14 +320,14 @@ module StarWars
 
     field :largestBase, BaseType, null: true, resolve: ->(obj, args, ctx) { Base.find(3) }
 
-    field :newestBasesGroupedByFaction, BaseType.connection_type, null: true, resolve: ->(obj, args, ctx) {
+    field :newestBasesGroupedByFaction, BaseConnection, null: true, resolve: ->(obj, args, ctx) {
       Base
         .having('id in (select max(id) from bases group by faction_id)')
         .group(:id)
         .order('faction_id desc')
     }
 
-    field :basesWithNullName, BaseType.connection_type, null: false, resolve: ->(obj, args, ctx) {
+    field :basesWithNullName, BaseConnection, null: false, resolve: ->(obj, args, ctx) {
       [OpenStruct.new(id: nil)]
     }
 
@@ -331,8 +354,7 @@ module StarWars
 
   class MutationType < GraphQL::Schema::Object
     graphql_name "Mutation"
-    # The mutation object exposes a field:
-    field :introduceShip, field: IntroduceShipMutation.field
+    field :introduceShip, mutation: IntroduceShipMutation
     field :introduceShipFunction, field: IntroduceShipFunctionMutation.field
   end
 

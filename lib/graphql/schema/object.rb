@@ -12,6 +12,45 @@ module GraphQL
       # @return [GraphQL::Query::Context] the context instance for this query
       attr_reader :context
 
+      class << self
+        # This is protected so that we can be sure callers use the public method, {.authorized_new}
+        # @see authorized_new to make instances
+        protected :new
+
+        # Make a new instance of this type _if_ the auth check passes,
+        # otherwise, raise an error.
+        #
+        # Probably only the framework should call this method.
+        #
+        # This might return a {GraphQL::Execution::Lazy} if the user-provided `.authorized?`
+        # hook returns some lazy value (like a Promise).
+        #
+        # The reason that the auth check is in this wrapper method instead of {.new} is because
+        # of how it might return a Promise. It would be weird if `.new` returned a promise;
+        # It would be a headache to try to maintain Promise-y state inside a {Schema::Object}
+        # instance. So, hopefully this wrapper method will do the job.
+        #
+        # @param object [Object] The thing wrapped by this object
+        # @param context [GraphQL::Query::Context]
+        # @return [GraphQL::Schema::Object, GraphQL::Execution::Lazy]
+        # @raise [GraphQL::UnauthorizedError] if the user-provided hook returns `false`
+        def authorized_new(object, context)
+          context.schema.after_lazy(authorized?(object, context)) do |is_authorized|
+            if is_authorized
+              self.new(object, context)
+            else
+              # It failed the authorization check, so go to the schema's authorized object hook
+              err = GraphQL::UnauthorizedError.new(object: object, type: self, context: context)
+              # If a new value was returned, wrap that instead of the original value
+              new_obj = context.schema.unauthorized_object(err)
+              if new_obj
+                self.new(new_obj, context)
+              end
+            end
+          end
+        end
+      end
+
       def initialize(object, context)
         @object = object
         @context = context
@@ -20,17 +59,15 @@ module GraphQL
       class << self
         def implements(*new_interfaces)
           new_interfaces.each do |int|
-            if int.is_a?(Class) && int < GraphQL::Schema::Interface
-              # Add the graphql field defns
-              int.fields.each do |name, field|
-                own_fields[name] = field
+            if int.is_a?(Module)
+              unless int.include?(GraphQL::Schema::Interface)
+                raise "#{int} cannot be implemented since it's not a GraphQL Interface. Use `include` for plain Ruby modules."
               end
-              # And call the implemented hook
-              int.implemented(self)
-            else
-              int.all_fields.each do |f|
-                field(f.name, field: f)
-              end
+
+              # Include the methods here,
+              # `.fields` will use the inheritance chain
+              # to find inherited fields
+              include(int)
             end
           end
           own_interfaces.concat(new_interfaces)
@@ -44,6 +81,21 @@ module GraphQL
           @own_interfaces ||= []
         end
 
+        # Include legacy-style interfaces, too
+        def fields
+          all_fields = super
+          interfaces.each do |int|
+            if int.is_a?(GraphQL::InterfaceType)
+              int_f = {}
+              int.fields.each do |name, legacy_field|
+                int_f[name] = field_class.from_options(name, field: legacy_field)
+              end
+              all_fields = int_f.merge(all_fields)
+            end
+          end
+          all_fields
+        end
+
         # @return [GraphQL::ObjectType]
         def to_graphql
           obj_type = GraphQL::ObjectType.new
@@ -52,7 +104,6 @@ module GraphQL
           obj_type.interfaces = interfaces
           obj_type.introspection = introspection
           obj_type.mutation = mutation
-
           fields.each do |field_name, field_inst|
             field_defn = field_inst.to_graphql
             obj_type.fields[field_defn.name] = field_defn
@@ -70,7 +121,11 @@ module GraphQL
           selections.each do |ast_field|
             field = fields.fetch(Member::BuildType.underscore(ast_field.name))
             args = interpreter.arguments_for(ast_field, field)
-            field_result = field.resolve(type_proxy, args)
+            field_result = if args.any?
+              type_proxy.public_send(field.method_sym, args)
+            else
+              type_proxy.public_send(field.method_sym)
+            end
             field_result_name = ast_field.alias || ast_field.name
             # TODO shouldn't require metadata
             next_type = field.type
@@ -83,6 +138,10 @@ module GraphQL
             result[field_result_name] = finished_result
           end
           result
+        end
+
+        def kind
+          GraphQL::TypeKinds::OBJECT
         end
       end
     end

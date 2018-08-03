@@ -19,47 +19,48 @@ class GraphQLGeneratorsMutationGeneratorTest < BaseGeneratorTest
     end
   end
 
-  test "it generates an empty resolver by name" do
-    setup
-    run_generator(["UpdateName"])
-
-    expected_content = <<-RUBY
-Mutations::UpdateName = GraphQL::Relay::Mutation.define do
-  name "UpdateName"
+  UPDATE_NAME_MUTATION = <<-RUBY
+class Mutations::UpdateName < GraphQL::Schema::RelayClassicMutation
   # TODO: define return fields
   # return_field :post, Types::PostType
 
   # TODO: define arguments
   # input_field :name, !types.String
 
-  resolve ->(obj, args, ctx) {
-    # TODO: define resolve function
-  }
+  def resolve(**inputs)
+    # TODO: define resolve method
+  end
 end
 RUBY
 
-    assert_file "app/graphql/mutations/update_name.rb", expected_content
+  EXPECTED_MUTATION_TYPE = <<-RUBY
+class Types::MutationType < Types::BaseObject
+  field :updateName, mutation: Mutations::UpdateName
+  # TODO: remove me
+  field :test_field, String, null: false,
+    description: "An example field added by the generator"
+  def test_field
+    "Hello World"
+  end
+end
+RUBY
+
+  test "it generates an empty resolver by name" do
+    setup
+    run_generator(["UpdateName"])
+    assert_file "app/graphql/mutations/update_name.rb", UPDATE_NAME_MUTATION
+  end
+
+  test "it inserts the field into the MutationType" do
+    setup
+    run_generator(["UpdateName"])
+    assert_file "app/graphql/types/mutation_type.rb", EXPECTED_MUTATION_TYPE
   end
 
   test "it allows for user-specified directory" do
     setup "app/mydirectory"
     run_generator(["UpdateName", "--directory", "app/mydirectory"])
 
-    expected_content = <<-RUBY
-Mutations::UpdateName = GraphQL::Relay::Mutation.define do
-  name "UpdateName"
-  # TODO: define return fields
-  # return_field :post, Types::PostType
-
-  # TODO: define arguments
-  # input_field :name, !types.String
-
-  resolve ->(obj, args, ctx) {
-    # TODO: define resolve function
-  }
-end
-RUBY
-
-    assert_file "app/mydirectory/mutations/update_name.rb", expected_content
+    assert_file "app/mydirectory/mutations/update_name.rb", UPDATE_NAME_MUTATION
   end
 end

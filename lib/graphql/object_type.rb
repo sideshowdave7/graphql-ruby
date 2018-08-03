@@ -22,11 +22,11 @@ module GraphQL
   #   end
   #
   class ObjectType < GraphQL::BaseType
-    accepts_definitions :interfaces, :fields, :mutation, field: GraphQL::Define::AssignObjectField
+    accepts_definitions :interfaces, :fields, :mutation, :relay_node_type, field: GraphQL::Define::AssignObjectField
     accepts_definitions implements: ->(type, *interfaces, inherit: false) { type.implements(interfaces, inherit: inherit) }
 
-    attr_accessor :fields, :mutation
-    ensure_defined(:fields, :mutation, :interfaces)
+    attr_accessor :fields, :mutation, :relay_node_type
+    ensure_defined(:fields, :mutation, :interfaces, :relay_node_type)
 
     # @!attribute fields
     #   @return [Hash<String => GraphQL::Field>] Map String fieldnames to their {GraphQL::Field} implementations
@@ -104,6 +104,10 @@ module GraphQL
 
     def evaluate_selections(object:, selections:, interpreter:)
       metadata[:type_class].evaluate_selections(object: object, selections: selections, interpreter: interpreter)
+    end
+
+    def resolve_type_proc
+      nil
     end
 
     protected

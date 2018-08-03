@@ -31,18 +31,17 @@ rails generate graphql:install
       <div class="teaser">
         <p>
           Describe your application with the
-          <a href="{{ site.baseurl }}/types/introduction">GraphQL type system</a>
+          <a href="{{ site.baseurl }}/schema/definition">GraphQL type system</a>
           to create a self-documenting, strongly-typed API.
         </p>
       </div>
       <div class="teaser">
 {% highlight ruby %}
 # app/graphql/types/profile_type.rb
-Types::ProfileType = GraphQL::ObjectType.define do
-  name "Profile"
-  field :id, !types.ID
-  field :name, !types.String
-  field :avatar, Types::PhotoType
+class Types::ProfileType < Types::BaseObject
+  field :id, ID, null: false
+  field :name, String, null: false
+  field :avatar, Types::PhotoType, null: true
 end
 {% endhighlight %}
       </div>

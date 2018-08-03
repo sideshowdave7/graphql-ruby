@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 module GraphQL
-  class Scalar
+  class Schema
     BUILT_IN_TYPES = {
       "Int" => INT_TYPE,
       "String" => STRING_TYPE,

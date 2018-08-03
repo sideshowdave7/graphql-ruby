@@ -4,11 +4,12 @@ require "spec_helper"
 describe GraphQL::Schema::Object do
   describe "class attributes" do
     let(:object_class) { Jazz::Ensemble }
+
     it "tells type data" do
       assert_equal "Ensemble", object_class.graphql_name
       assert_equal "A group of musicians playing together", object_class.description
       assert_equal 6, object_class.fields.size
-      assert_equal 2, object_class.interfaces.size
+      assert_equal 3, object_class.interfaces.size
       # Compatibility methods are delegated to the underlying BaseType
       assert object_class.respond_to?(:connection_type)
     end
@@ -22,7 +23,7 @@ describe GraphQL::Schema::Object do
       # one more than the parent class
       assert_equal 7, new_object_class.fields.size
       # inherited interfaces are present
-      assert_equal 2, new_object_class.interfaces.size
+      assert_equal 3, new_object_class.interfaces.size
       # The new field is present
       assert new_object_class.fields.key?("newField")
       # The overridden field is present:
@@ -40,6 +41,62 @@ describe GraphQL::Schema::Object do
       assert_equal "NewSubclass", new_subclass_2.graphql_name
       assert_equal object_class.description, new_subclass_2.description
     end
+
+    it "should take Ruby name (without Type suffix) as default graphql name" do
+      TestingClassType = Class.new(GraphQL::Schema::Object)
+      assert_equal "TestingClass", TestingClassType.graphql_name
+    end
+
+    it "raise on anonymous class without declared graphql name" do
+      anonymous_class = Class.new(GraphQL::Schema::Object)
+      assert_raises NotImplementedError do
+        anonymous_class.graphql_name
+      end
+    end
+
+    class OverrideNameObject < GraphQL::Schema::Object
+      class << self
+        def default_graphql_name
+          "Override"
+        end
+      end
+    end
+
+    it "can override the default graphql_name" do
+      override_name_object = OverrideNameObject
+
+      assert_equal "Override", override_name_object.graphql_name
+    end
+  end
+
+  describe "implementing interfaces" do
+    it "raises an error when trying to implement a non-interface module" do
+      object_type = Class.new(GraphQL::Schema::Object)
+
+      module NotAnInterface
+      end
+
+      err = assert_raises do
+        object_type.implements(NotAnInterface)
+      end
+
+      message = "NotAnInterface cannot be implemented since it's not a GraphQL Interface. Use `include` for plain Ruby modules."
+      assert_equal message, err.message
+    end
+
+    it "does not inherit singleton methods from base interface when implementing another interface" do
+      object_type = Class.new(GraphQL::Schema::Object)
+      methods = object_type.singleton_methods
+      method_defs = Hash[methods.zip(methods.map{|method| object_type.method(method.to_sym)})]
+
+      module InterfaceType
+        include GraphQL::Schema::Interface
+      end
+
+      object_type.implements(InterfaceType)
+      new_method_defs = Hash[methods.zip(methods.map{|method| object_type.method(method.to_sym)})]
+      assert_equal method_defs, new_method_defs
+    end
   end
 
   describe "wrapping a Hash" do
@@ -47,7 +104,6 @@ describe GraphQL::Schema::Object do
       query_str = <<-GRAPHQL
       {
         hashyEnsemble {
-          name
           musicians { name }
           formedAt
         }
@@ -55,13 +111,40 @@ describe GraphQL::Schema::Object do
       GRAPHQL
       res = Jazz::Schema.execute(query_str)
       ensemble = res["data"]["hashyEnsemble"]
-      assert_equal "The Grateful Dead", ensemble["name"]
       assert_equal ["Jerry Garcia"], ensemble["musicians"].map { |m| m["name"] }
       assert_equal "May 5, 1965", ensemble["formedAt"]
     end
+
+    it "works with strings and symbols" do
+      query_str = <<-GRAPHQL
+      {
+        hashByString { falsey }
+        hashBySym { falsey }
+      }
+      GRAPHQL
+      res = Jazz::Schema.execute(query_str)
+      assert_equal false, res["data"]["hashByString"]["falsey"]
+      assert_equal false, res["data"]["hashBySym"]["falsey"]
+    end
   end
 
-  describe ".to_graphql_type" do
+  describe "wrapping `nil`" do
+    it "doesn't wrap nil in lists" do
+      query_str = <<-GRAPHQL
+      {
+        namedEntities {
+          name
+        }
+      }
+      GRAPHQL
+
+      res = Jazz::Schema.execute(query_str)
+      expected_items = [{"name" => "Bela Fleck and the Flecktones"}, nil]
+      assert_equal expected_items, res["data"]["namedEntities"]
+    end
+  end
+
+  describe ".to_graphql" do
     let(:obj_type) { Jazz::Ensemble.to_graphql }
     it "returns a matching GraphQL::ObjectType" do
       assert_equal "Ensemble", obj_type.name
@@ -86,7 +169,7 @@ describe GraphQL::Schema::Object do
       GRAPHQL
 
       res = Jazz::Schema.execute(query_str)
-      assert_equal ["BELA FLECK AND THE FLECKTONES"], res["data"]["ensembles"].map { |e| e["upcaseName"] }
+      assert_equal ["BELA FLECK AND THE FLECKTONES", "ROBERT GLASPER EXPERIMENT"], res["data"]["ensembles"].map { |e| e["upcaseName"] }
     end
   end
 
@@ -104,7 +187,11 @@ describe GraphQL::Schema::Object do
       }
       GRAPHQL
       res = Jazz::Schema.execute(query_str)
-      assert_equal [{"name" => "Bela Fleck and the Flecktones"}], res["data"]["ensembles"]
+      expected_ensembles = [
+        {"name" => "Bela Fleck and the Flecktones"},
+        {"name" => "ROBERT GLASPER Experiment"},
+      ]
+      assert_equal expected_ensembles, res["data"]["ensembles"]
       assert_equal({"name" => "Banjo"}, res["data"]["instruments"].first)
     end
 
@@ -127,10 +214,10 @@ describe GraphQL::Schema::Object do
       }
       GRAPHQL
 
-      res = Jazz::Schema.execute(mutation_str, variables: { "name" => "Miles Davis Quartet" })
+      res = Jazz::Schema.execute(mutation_str, variables: { name: "Miles Davis Quartet" })
       new_id = res["data"]["addEnsemble"]["id"]
 
-      res2 = Jazz::Schema.execute(query_str, variables: { "id" => new_id })
+      res2 = Jazz::Schema.execute(query_str, variables: { id: new_id })
       assert_equal "Miles Davis Quartet", res2["data"]["find"]["name"]
     end
 
