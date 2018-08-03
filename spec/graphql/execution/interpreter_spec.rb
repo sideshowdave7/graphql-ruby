@@ -68,15 +68,15 @@ describe GraphQL::Execution::Interpreter do
   end
 
   it "runs a query" do
-    result = InterpreterTest::Schema.execute <<-GRAPHQL
-    {
+    query_string = <<-GRAPHQL
+    query($expansion: String!){
       card(name: "Dark Confidant") {
         colors
         expansion {
           name
         }
       }
-      expansion(sym: "RAV") {
+      expansion(sym: $expansion) {
         cards {
           name
         }
@@ -84,6 +84,7 @@ describe GraphQL::Execution::Interpreter do
     }
     GRAPHQL
 
+    result = result = InterpreterTest::Schema.execute(query_string, variables: { expansion: "RAV" })
     pp result
     assert_equal ["BLACK"], result["data"]["card"]["colors"]
     assert_equal "Ravnica, City of Guilds", result["data"]["card"]["expansion"]["name"]

@@ -53,12 +53,17 @@ module GraphQL
       # and
       # TODO: HAHAH this is very not good
       # - Apply scalar coerce functions
-      # - Consider `variables`
       # - Cache the results and reuse them?
       def arguments_for(ast_node, field_instance)
         ruby_kwargs = {}
         ast_node.arguments.each do |ast_arg|
-          ruby_kwargs[Schema::Member::BuildType.underscore(ast_arg.name).to_sym] = ast_arg.value
+          ruby_arg_value = if ast_arg.value.is_a?(Language::Nodes::VariableIdentifier)
+            query.variables[ast_arg.value.name]
+          else
+            ast_arg.value
+          end
+          ruby_arg_name = Schema::Member::BuildType.underscore(ast_arg.name).to_sym
+          ruby_kwargs[ruby_arg_name] = ruby_arg_value
         end
         ruby_kwargs
       end
