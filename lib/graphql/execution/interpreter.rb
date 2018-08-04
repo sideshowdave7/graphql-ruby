@@ -42,7 +42,7 @@ module GraphQL
         object_type = query.root_type_for_operation(operation.operation_type)
         application_object = query.root_value
 
-        result = object_type.evaluate_selections(
+        object_type.evaluate_selections(
           object: application_object,
           selections: selections,
           interpreter: self,

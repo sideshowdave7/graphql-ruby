@@ -27,6 +27,7 @@ module GraphQL
           end
         end
       end
+
       # Build a connection field from a {GraphQL::Field} by:
       # - Merging in the default arguments
       # - Transforming its resolve function to return a connection object
